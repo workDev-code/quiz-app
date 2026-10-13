@@ -1,0 +1,22 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    clean-disabled: false
+  datasource:
+    url: jdbc:postgresql://localhost:5433/quizdb
+    username: quiz
+    password: quiz
+app:
+  jwt:
+    secret: test-only-secret-32chars-minimum-required-for-hmac-sha-256
+    expiry-minutes: 60
+  seed:
+    enabled: true
+  cors:
+    allowed-origins: http://localhost
+logging:
+  level:
+    com.anhtduong.quiz: INFO

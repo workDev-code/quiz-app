@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quiz-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-quizdb}
+      POSTGRES_USER: ${POSTGRES_USER:-quiz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quiz}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - quiz_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quiz} -d ${POSTGRES_DB:-quizdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: ./backend
+    container_name: quiz-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-quizdb}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-quiz}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-quiz}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-please-change-in-production-this-is-32chars-min}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:80}
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    container_name: quiz-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+
+volumes:
+  quiz_pg:

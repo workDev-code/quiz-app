@@ -1,0 +1,6 @@
+app:
+  seed:
+    enabled: false
+logging:
+  level:
+    com.anhtduong: INFO
