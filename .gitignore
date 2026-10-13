@@ -3,14 +3,14 @@ target/
 *.class
 *.jar
 .m2/
+*.tsbuildinfo
 
 # Node
 node_modules/
 dist/
-.env
-*.log
-.vscode/
-.idea/
+*.d.ts
+vite.config.js
+vite.config.d.ts
 
 # Local config
 .env
@@ -21,3 +21,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml
