@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { useForm } from 'react-hook-form'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Button } from '@/components/Button'
 import { Field, TextInput } from '@/components/Field'
@@ -12,19 +12,25 @@ import { ApiCallError } from '@/lib/api'
 import { toast } from '@/lib/toast'
 
 export default function LoginPage() {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginInput>({ resolver: zodResolver(loginSchema) })
+  const { control, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    mode: 'onChange',        // validate ngay khi gõ, tránh stale state với extension
+    defaultValues: { email: '', password: '' }
+  })
   const [err, setErr] = useState<string | null>(null)
   const setAuth = useAuth((s) => s.setAuth)
   const nav = useNavigate()
-  const loc = useLocation()
-  const flash = sessionStorage.getItem('flash')
-  if (flash) { sessionStorage.removeItem('flash') }
+
+  // Đọc flash message (khi 401 từ interceptor đẩy về /login)
+  const [flash] = useState(() => sessionStorage.getItem('flash'))
+  useEffect(() => { if (flash) sessionStorage.removeItem('flash') }, [flash])
 
   const onSubmit = async (data: LoginInput) => {
     setErr(null)
     try {
       const r = await auth.login(data.email.trim(), data.password)
       setAuth(r)
+      reset()
       toast('Đăng nhập thành công', 'good')
       nav(r.user.role === 'TEACHER' ? '/teacher' : '/')
     } catch (e) {
@@ -42,8 +48,6 @@ export default function LoginPage() {
             <g stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="12" y1="2" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="22" />
               <line x1="2" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="22" y2="12" />
-              <line x1="4.5" y1="4.5" x2="6.5" y2="6.5" /><line x1="17.5" y1="17.5" x2="19.5" y2="19.5" />
-              <line x1="4.5" y1="19.5" x2="6.5" y2="17.5" /><line x1="17.5" y1="6.5" x2="19.5" y2="4.5" />
             </g>
           </svg>
           Ánh Dương Quiz
@@ -61,10 +65,40 @@ export default function LoginPage() {
         {err ? <Banner tone="bad" role="alert">{err}</Banner> : null}
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <Field label="Email" error={errors.email?.message}>
-            <TextInput type="email" autoComplete="email" {...register('email')} invalid={!!errors.email} />
+            <Controller
+              name="email"
+              control={control}
+              render={({ field }) => (
+                <TextInput
+                  type="email"
+                  autoComplete="email"
+                  name={field.name}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  ref={field.ref}
+                  invalid={!!errors.email}
+                />
+              )}
+            />
           </Field>
           <Field label="Mật khẩu" error={errors.password?.message}>
-            <TextInput type="password" autoComplete="current-password" {...register('password')} invalid={!!errors.password} />
+            <Controller
+              name="password"
+              control={control}
+              render={({ field }) => (
+                <TextInput
+                  type="password"
+                  autoComplete="current-password"
+                  name={field.name}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  ref={field.ref}
+                  invalid={!!errors.password}
+                />
+              )}
+            />
           </Field>
           <Button variant="primary" type="submit" disabled={isSubmitting}>
             {isSubmitting ? 'Đang đăng nhập...' : 'Đăng nhập'}

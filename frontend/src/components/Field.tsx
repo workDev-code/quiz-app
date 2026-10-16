@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes, SelectHTMLAttributes } from 'react'
+import { forwardRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes, type SelectHTMLAttributes } from 'react'
 import clsx from 'clsx'
 
 export function Field({ label, error, hint, children }: { label: string; error?: string; hint?: ReactNode; children: ReactNode }) {
@@ -11,17 +11,29 @@ export function Field({ label, error, hint, children }: { label: string; error?:
   )
 }
 
-export function TextInput(props: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
-  const { invalid, className, ...rest } = props
-  return <input className={clsx('input', className)} aria-invalid={invalid ? 'true' : undefined} {...rest} />
-}
+type TextInputProps = InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }
 
-export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }) {
-  const { invalid, className, ...rest } = props
-  return <textarea className={clsx('input', className)} aria-invalid={invalid ? 'true' : undefined} {...rest} />
-}
+export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
+  { invalid, className, ...rest },
+  ref
+) {
+  return <input ref={ref} className={clsx('input', className)} aria-invalid={invalid ? 'true' : undefined} {...rest} />
+})
 
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }) {
-  const { invalid, className, children, ...rest } = props
-  return <select className={clsx('input', className)} aria-invalid={invalid ? 'true' : undefined} {...rest}>{children}</select>
-}
+type TextAreaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }
+
+export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function TextArea(
+  { invalid, className, ...rest },
+  ref
+) {
+  return <textarea ref={ref} className={clsx('input', className)} aria-invalid={invalid ? 'true' : undefined} {...rest} />
+})
+
+type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }
+
+export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
+  { invalid, className, children, ...rest },
+  ref
+) {
+  return <select ref={ref} className={clsx('input', className)} aria-invalid={invalid ? 'true' : undefined} {...rest}>{children}</select>
+})

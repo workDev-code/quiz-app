@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Button } from '@/components/Button'
 import { Field, TextInput } from '@/components/Field'
@@ -12,7 +12,11 @@ import { ApiCallError } from '@/lib/api'
 import { toast } from '@/lib/toast'
 
 export default function RegisterPage() {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<RegisterInput>({ resolver: zodResolver(registerSchema) })
+  const { control, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<RegisterInput>({
+    resolver: zodResolver(registerSchema),
+    mode: 'onChange',
+    defaultValues: { name: '', email: '', password: '' }
+  })
   const [err, setErr] = useState<string | null>(null)
   const setAuth = useAuth((s) => s.setAuth)
   const nav = useNavigate()
@@ -22,6 +26,7 @@ export default function RegisterPage() {
     try {
       const r = await auth.register(data.name.trim(), data.email.trim(), data.password)
       setAuth(r)
+      reset()
       toast('Tạo tài khoản thành công', 'good')
       nav('/')
     } catch (e) {
@@ -55,13 +60,57 @@ export default function RegisterPage() {
         {err ? <Banner tone="bad" role="alert">{err}</Banner> : null}
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <Field label="Họ tên" error={errors.name?.message}>
-            <TextInput autoComplete="name" {...register('name')} invalid={!!errors.name} />
+            <Controller
+              name="name"
+              control={control}
+              render={({ field }) => (
+                <TextInput
+                  autoComplete="name"
+                  name={field.name}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  ref={field.ref}
+                  invalid={!!errors.name}
+                />
+              )}
+            />
           </Field>
           <Field label="Email" error={errors.email?.message}>
-            <TextInput type="email" autoComplete="email" {...register('email')} invalid={!!errors.email} />
+            <Controller
+              name="email"
+              control={control}
+              render={({ field }) => (
+                <TextInput
+                  type="email"
+                  autoComplete="email"
+                  name={field.name}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  ref={field.ref}
+                  invalid={!!errors.email}
+                />
+              )}
+            />
           </Field>
           <Field label="Mật khẩu" hint="Ít nhất 8 ký tự, gồm cả chữ và số" error={errors.password?.message}>
-            <TextInput type="password" autoComplete="new-password" {...register('password')} invalid={!!errors.password} />
+            <Controller
+              name="password"
+              control={control}
+              render={({ field }) => (
+                <TextInput
+                  type="password"
+                  autoComplete="new-password"
+                  name={field.name}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  ref={field.ref}
+                  invalid={!!errors.password}
+                />
+              )}
+            />
           </Field>
           <Button variant="primary" type="submit" disabled={isSubmitting}>
             {isSubmitting ? 'Đang tạo...' : 'Tạo tài khoản'}
