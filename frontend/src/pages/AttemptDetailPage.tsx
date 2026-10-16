@@ -52,7 +52,7 @@ export default function AttemptDetailPage() {
                 : <Pill tone="bad">Sai</Pill>}
             </div>
             <div className="opts" style={{ marginTop: 8 }}>
-              {it.options.map((o) => {
+              {it.options?.map((o) => {
                 const isCorrect = o.correct
                 const isChosen = o.chosen
                 let cls = 'choice'

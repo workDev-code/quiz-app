@@ -3,6 +3,7 @@ package com.anhtduong.quiz.attempt;
 import com.anhtduong.quiz.common.BusinessException;
 import com.anhtduong.quiz.question.AnswerOptionEntity;
 import com.anhtduong.quiz.question.QuestionEntity;
+import com.anhtduong.quiz.question.QuestionRepository;
 import com.anhtduong.quiz.quiz.QuizEntity;
 import com.anhtduong.quiz.quiz.QuizRepository;
 import com.anhtduong.quiz.user.CurrentUser;
@@ -31,10 +32,13 @@ public class AttemptService {
     private final AttemptRepository attempts;
     private final UserRepository users;
 
-    public AttemptService(QuizRepository quizzes, AttemptRepository attempts, UserRepository users) {
+    private final QuestionRepository questions;
+
+    public AttemptService(QuizRepository quizzes, AttemptRepository attempts, UserRepository users, QuestionRepository questions) {
         this.quizzes = quizzes;
         this.attempts = attempts;
         this.users = users;
+        this.questions = questions;
     }
 
     /**
@@ -212,14 +216,17 @@ public class AttemptService {
         boolean open = q.getStatus() == QuizEntity.Status.PUBLISHED
                 && (q.getClosesAt() == null || q.getClosesAt().isAfter(Instant.now()));
         d.canRetry = open && d.attemptsLeft > 0;
+        // Load questions + options for review (1 truy vấn cho cả attempt)
+        java.util.Map<Long, QuestionEntity> qById = questions.findByQuizIdOrderByPositionAsc(q.getId()).stream()
+                .collect(java.util.stream.Collectors.toMap(QuestionEntity::getId, x -> x));
         d.items = a.getAnswers().stream()
                 .sorted(Comparator.comparingInt(AttemptAnswerEntity::getPosition))
-                .map(this::toReview)
+                .map(aa -> toReview(aa, qById))
                 .toList();
         return d;
     }
 
-    private AttemptDtos.ReviewQuestion toReview(AttemptAnswerEntity aa) {
+    private AttemptDtos.ReviewQuestion toReview(AttemptAnswerEntity aa, java.util.Map<Long, QuestionEntity> qById) {
         AttemptDtos.ReviewQuestion r = new AttemptDtos.ReviewQuestion();
         r.questionId = aa.getQuestionIdSnapshot();
         r.text = aa.getQuestionText();
@@ -228,6 +235,23 @@ public class AttemptService {
         r.explanation = aa.getExplanationSnapshot();
         r.answered = aa.getChosenOptionId() != null;
         r.correct = r.answered && Objects.equals(aa.getChosenOptionId(), aa.getCorrectOptionId());
+        // Lấy options từ question (hiện tại - trade-off: nếu giáo viên sửa, review dùng bản mới).
+        // TODO: snapshot toàn bộ options vào attempt_answers để bảo toàn lịch sử.
+        QuestionEntity q = qById.get(aa.getQuestionIdSnapshot());
+        if (q != null) {
+            r.options = q.getOptions().stream()
+                    .sorted(java.util.Comparator.comparingInt(AnswerOptionEntity::getPosition))
+                    .map(o -> {
+                        AttemptDtos.ReviewOption ro = new AttemptDtos.ReviewOption();
+                        ro.id = o.getId();
+                        ro.text = o.getText();
+                        ro.correct = o.isCorrect();
+                        ro.chosen = aa.getChosenOptionId() != null
+                                && Objects.equals(o.getId(), aa.getChosenOptionId());
+                        return ro;
+                    })
+                    .toList();
+        }
         return r;
     }
 
