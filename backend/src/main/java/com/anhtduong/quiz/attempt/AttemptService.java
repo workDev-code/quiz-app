@@ -127,9 +127,9 @@ public class AttemptService {
         attempt.setStartedAt(started);
         attempt.setSubmittedAt(Instant.now());
 
-        List<QuestionEntity> orderedQuestions = new ArrayList<>(quizQs);
-        orderedQuestions.sort(Comparator.comparingInt(QuestionEntity::getPosition));
-        for (QuestionEntity qe : orderedQuestions) {
+        // loadQuestionsForQuiz() đã trả về đúng thứ tự trong quiz_questions.
+        // Không sort lại theo questions.position: cột đó đã nullable và không còn là nguồn sự thật.
+        for (QuestionEntity qe : quizQs) {
             AnswerOptionEntity correctOpt = qe.getOptions().stream().filter(AnswerOptionEntity::isCorrect).findFirst().orElse(null);
             AnswerOptionEntity chosenOpt = chosen.get(qe.getId());
             boolean isCorrect = chosenOpt != null && correctOpt != null
@@ -145,7 +145,7 @@ public class AttemptService {
             ans.setCorrectOptionId(correctOpt == null ? -1L : correctOpt.getId());
             ans.setCorrectOptionText(correctOpt == null ? "" : correctOpt.getText());
             ans.setExplanationSnapshot(qe.getExplanation());
-            ans.setQuestionPosition(qe.getPosition());
+            ans.setQuestionPosition(pos);        // số thứ tự câu hỏi trong đề (theo quiz_questions)
             ans.setPosition(pos++);
             attempt.getAnswers().add(ans);
         }

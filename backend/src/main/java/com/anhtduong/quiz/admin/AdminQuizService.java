@@ -113,6 +113,7 @@ public class AdminQuizService {
         int i = 0;
         for (AdminQuizDtos.OptionInput o : req.options()) {
             AnswerOptionEntity opt = new AnswerOptionEntity();
+            opt.setQuestion(qe);
             opt.setText(o.text().trim());
             opt.setCorrect(o.correct());
             opt.setPosition(i++);

@@ -29,4 +29,21 @@ public interface QuizQuestionRepository extends JpaRepository<QuizQuestionEntity
     @Modifying
     @Query("DELETE FROM QuizQuestionEntity qq WHERE qq.quizId = :quizId")
     void deleteByQuizId(@Param("quizId") Long quizId);
+
+    /**
+     * Đếm số đề đang dùng mỗi câu hỏi, và đếm riêng số đề đã xuất bản.
+     * Mỗi dòng trả về: {questionId, usageCount, publishedCount}.
+     * Dùng native query vì cần JOIN sang bảng {@code quizzes}; mapping table cố tình
+     * không được map thành quan hệ JPA (giữ QuizQuestionEntity thuần theo id).
+     */
+    @Query(value = """
+            SELECT qq.question_id                                   AS question_id,
+                   COUNT(*)                                         AS usage_count,
+                   COUNT(*) FILTER (WHERE qz.status = 'PUBLISHED')  AS published_count
+            FROM quiz_questions qq
+            JOIN quizzes qz ON qz.id = qq.quiz_id
+            WHERE qq.question_id IN (:qids)
+            GROUP BY qq.question_id
+            """, nativeQuery = true)
+    List<Object[]> countUsageByQuestionIds(@Param("qids") List<Long> qids);
 }

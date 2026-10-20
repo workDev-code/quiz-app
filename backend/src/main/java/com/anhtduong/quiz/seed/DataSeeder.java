@@ -1,5 +1,6 @@
 package com.anhtduong.quiz.seed;
 
+import com.anhtduong.quiz.question.AnswerOptionEntity;
 import com.anhtduong.quiz.question.QuestionEntity;
 import com.anhtduong.quiz.question.QuizQuestionEntity;
 import com.anhtduong.quiz.quiz.QuizEntity;
@@ -163,7 +164,8 @@ public class DataSeeder implements CommandLineRunner {
         qe.setType("SINGLE_CHOICE");
         int i = 0;
         for (String t : options) {
-            com.anhtduong.quiz.question.AnswerOptionEntity o = new com.anhtduong.quiz.question.AnswerOptionEntity();
+            AnswerOptionEntity o = new AnswerOptionEntity();
+            o.setQuestion(qe);
             o.setText(t);
             o.setCorrect(i == correctIdx);
             o.setPosition(i);

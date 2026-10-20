@@ -21,7 +21,9 @@ import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Test tích hợp dùng PostgreSQL đang chạy ở localhost:5433 (khởi động qua Docker Compose).
+ * Test tích hợp dùng PostgreSQL đang chạy ở localhost (khởi động qua Docker Compose).
+ * Cổng lấy từ biến môi trường POSTGRES_PORT, mặc định 5432 — phải khớp với
+ * application-test.yml (cũng đọc POSTGRES_PORT).
  * Reset schema một lần trước class đầu tiên; Flyway sẽ tự tạo lại dữ liệu.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -29,6 +31,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public abstract class AbstractIntegrationTest {
 
     private static final AtomicBoolean RESET_DONE = new AtomicBoolean(false);
+
+    /** Cùng nguồn với application-test.yml để reset đúng database mà app test đang dùng. */
+    private static final String JDBC_URL = "jdbc:postgresql://localhost:"
+            + System.getenv().getOrDefault("POSTGRES_PORT", "5432") + "/quizdb";
 
     @LocalServerPort protected int port;
     @Autowired protected ObjectMapper json;
@@ -40,7 +46,7 @@ public abstract class AbstractIntegrationTest {
     @BeforeAll
     static void resetSchemaOnce() {
         if (RESET_DONE.compareAndSet(false, true)) {
-            try (Connection c = DriverManager.getConnection("jdbc:postgresql://localhost:5433/quizdb", "quiz", "quiz");
+            try (Connection c = DriverManager.getConnection(JDBC_URL, "quiz", "quiz");
                  Statement s = c.createStatement()) {
                 s.execute("DROP SCHEMA IF EXISTS public CASCADE");
                 s.execute("CREATE SCHEMA public");
