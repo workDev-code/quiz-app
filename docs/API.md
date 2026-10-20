@@ -123,3 +123,38 @@ Sửa câu. Khi locked, không được xoá option hay đổi correct.
 
 ### GET /api/admin/quizzes/{id}/attempts (TEACHER)
 Bảng kết quả của giáo viên.
+
+---
+
+## Ngân hàng câu hỏi (TEACHER)
+
+Câu hỏi tồn tại độc lập trong bảng `questions`; đề thi mượn qua bảng `quiz_questions`.
+
+### GET /api/admin/questions
+Tìm trong ngân hàng. Tất cả tham số đều tuỳ chọn.
+
+| Query | Ý nghĩa |
+|-------|---------|
+| `search` | tìm trong nội dung câu hỏi, không phân biệt hoa thường |
+| `difficulty` | `EASY` / `MEDIUM` / `HARD` |
+| `tagId` | chỉ lấy câu có gắn thẻ này |
+
+Trả về danh sách, mỗi phần tử gồm options, tags, `usageCount` (số đề đang dùng) và
+`usedInPublishedQuiz` (đang nằm trong đề đã xuất bản hay không).
+
+### POST /api/admin/quizzes/{quizId}/questions/{questionId}
+Mượn 1 câu có sẵn trong bank vào cuối đề. Câu hỏi gốc không bị nhân bản.
+
+- 404 `QUIZ_NOT_FOUND` / `QUESTION_NOT_FOUND`
+- 409 `ALREADY_LINKED` — câu này đã có trong đề
+- 409 `QUIZ_PUBLISHED` — đề đang xuất bản, phải gỡ xuất bản trước
+
+### DELETE /api/admin/quizzes/{quizId}/questions/{questionId}
+Gỡ câu khỏi đề. Câu hỏi **vẫn còn** trong ngân hàng.
+- 404 `LINK_NOT_FOUND`
+
+### GET / POST / DELETE /api/admin/tags
+Danh sách thẻ chủ đề (sắp xếp alphabet), tạo thẻ mới, xoá thẻ (kèm các liên kết của nó).
+
+- 409 `TAG_EXISTS` — tên trùng
+- 422 `VALIDATION_FAILED` — tên rỗng hoặc quá 60 ký tự

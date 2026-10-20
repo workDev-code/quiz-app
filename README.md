@@ -17,16 +17,17 @@
 | Frontend | React 18 + TypeScript + Vite, React Router 6, TanStack Query 5, React Hook Form + Zod, Tailwind CSS 3, Vitest + Testing Library |
 | Infra    | Docker Compose, GitHub Actions (build + test cho backend và frontend) |
 
-## 2. Chạy nhanh với Docker Compose (khuyến nghị)
+## 2. Chạy bằng Docker Compose (nhanh nhất, giống hệ thống thật)
 
 Yêu cầu: Docker + Docker Compose.
 
 ```bash
-# 1. Clone hoặc cd vào dự án
+# 1. Chuẩn bị file env
 cp .env.example .env
 
 # 2. Khởi động PostgreSQL + backend + frontend
 docker compose up -d --build
+# hoặc: ./scripts/prod-up.sh
 
 # 3. Mở trình duyệt
 # Frontend:  http://localhost:5173
@@ -38,25 +39,50 @@ docker compose up -d --build
 #    Giáo viên: giaovien@demo.vn / Demo@1234
 ```
 
+> **Lưu ý khi code:** ở chế độ này code nằm trong Docker, nên sửa `.java` hay `.tsx` phải
+> `docker compose up -d --build` lại mới thấy — không có F5. Khi đang phát triển hãy dùng
+> **cách ở mục 3**, chỉ quay lại cách này để demo hoặc kiểm tra giống production.
+
+Dừng: `docker compose down`
+
 Khi lên production, **đổi `JWT_SECRET`** trong `.env` thành chuỗi ngẫu nhiên ≥ 32 ký tự.
 
-## 3. Chạy thủ công (cho phát triển)
+## 3. Chạy khi phát triển (khuyến nghị khi code)
+
+Ý tưởng: chỉ **database** chạy trong Docker (ít thay đổi, không cần reload), còn
+backend và frontend chạy trực tiếp trên máy để có hot reload.
 
 ```bash
-# Backend (yêu cầu PostgreSQL ở localhost:5432 hoặc trỏ SPRING_DATASOURCE_URL)
+# Bước 0: chỉ khởi động PostgreSQL trong Docker
+cp .env.example .env      # lần đầu
+./scripts/dev-up.sh       # hoặc: docker compose up -d postgres
+
+# Bước 1 — Terminal 1: backend (Spring DevTools tự restart khi sửa .java)
 cd backend
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/quizdb \
-SPRING_DATASOURCE_USERNAME=quiz \
-SPRING_DATASOURCE_PASSWORD=quiz \
-SPRING_PROFILES_ACTIVE=dev \
 mvn spring-boot:run
 
-# Frontend (terminal khác)
+# Bước 2 — Terminal 2: frontend (Vite HMR, F5 là thấy ngay)
 cd frontend
 npm install
 npm run dev
-# Truy cập http://localhost:5173 - Vite proxy /api sang :8080
+
+# → http://localhost:5173, Vite proxy /api sang :8080
 ```
+
+Dừng: đóng 2 terminal trên, rồi `./scripts/dev-down.sh`
+
+Không cần khai báo biến môi trường: `application.yml` đã mặc định profile `dev`
+(bật sẵn dữ liệu mẫu) và trỏ `localhost:5432` với user `quiz`/`quiz` — trùng với
+`docker-compose.yml`. Nếu bạn đổi cấu hình Postgres thì khai báo thêm:
+
+```bash
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:<port>/quizdb \
+SPRING_DATASOURCE_USERNAME=quiz SPRING_DATASOURCE_PASSWORD=quiz \
+mvn spring-boot:run
+```
+
+Schema do **Flyway** quản lý (`V1__init.sql`, `V2__question_bank.sql`), Hibernate chỉ
+`validate` — không tự tạo bảng.
 
 ## 4. Cấu trúc repo
 
@@ -69,7 +95,8 @@ quiz-app/
 │   │   ├── user/            # UserEntity, MeController
 │   │   ├── security/        # JwtService, JwtAuthFilter, SecurityConfig
 │   │   ├── quiz/            # StudentQuizController/Service, StudentDashboard
-│   │   ├── question/        # Question, AnswerOption entities
+│   │   ├── question/        # Question, AnswerOption + ngân hàng câu hỏi
+│   │   │                    #   (QuizQuestion, Tag, QuestionTag, QuestionBank*)
 │   │   ├── attempt/         # AttemptService, snapshot, idempotency
 │   │   ├── admin/           # Teacher endpoints (CRUD quiz, publish, questions)
 │   │   ├── common/          # ApiError, BusinessException, GlobalExceptionHandler
@@ -79,7 +106,9 @@ quiz-app/
 │   │   ├── application.yml
 │   │   ├── application-dev.yml
 │   │   ├── application-prod.yml
-│   │   └── db/migration/V1__init.sql
+│   │   └── db/migration/
+│   │       ├── V1__init.sql
+│   │       └── V2__question_bank.sql   # tách câu hỏi khỏi đề, thêm bảng mapping + tags
 │   ├── src/test/...
 │   ├── Dockerfile
 │   └── pom.xml
@@ -97,6 +126,10 @@ quiz-app/
 │   ├── vite.config.ts
 │   ├── Dockerfile
 │   └── nginx.conf
+├── scripts/
+│   ├── dev-up.sh           # chỉ bật Postgres (cho môi trường dev)
+│   ├── dev-down.sh         # dừng Postgres
+│   └── prod-up.sh          # bật full-stack trong Docker
 ├── docs/
 │   ├── AUDIT.md             # audit repo lúc nhận
 │   ├── DECISIONS.md         # các quyết định kỹ thuật
@@ -136,8 +169,15 @@ npm test                  # chạy vitest
 npm run build             # build production
 ```
 
-Test backend cần PostgreSQL 16 đang chạy ở `localhost:5433` (xem CI để biết cách dùng
-service `postgres`). Schema sẽ tự reset một lần trước khi class đầu tiên chạy; Flyway tạo lại.
+**Backend test cần PostgreSQL đang chạy.** Trước khi `mvn test`, hãy bật Postgres:
+
+```bash
+docker compose up -d postgres
+```
+
+Test tích hợp kết nối `localhost:5432` (đọc biến môi trường `POSTGRES_PORT`, mặc định
+`5432` — trùng với `docker-compose.yml` và với service `postgres` trong CI).
+Schema được reset một lần trước class đầu tiên rồi Flyway tạo lại từ đầu.
 
 ## 7. API tóm tắt
 
@@ -160,11 +200,44 @@ service `postgres`). Schema sẽ tự reset một lần trước khi class đầ
 | POST | /api/admin/quizzes/{id}/questions | TEACHER | Thêm câu hỏi |
 | PUT/DELETE | /api/admin/questions/{id} | TEACHER | Sửa/xoá câu hỏi (giới hạn khi locked) |
 | GET  | /api/admin/quizzes/{id}/attempts | TEACHER | Bảng kết quả của giáo viên |
+| GET  | /api/admin/questions | TEACHER | **Tìm trong ngân hàng câu hỏi** — `?search=&difficulty=&tagId=` |
+| POST | /api/admin/quizzes/{id}/questions/{questionId} | TEACHER | **Mượn** câu hỏi trong bank vào đề (không copy) |
+| DELETE | /api/admin/quizzes/{id}/questions/{questionId} | TEACHER | **Gỡ** câu hỏi khỏi đề (câu vẫn còn trong bank) |
+| GET/POST | /api/admin/tags | TEACHER | Liệt kê / tạo thẻ chủ đề |
+| DELETE | /api/admin/tags/{tagId} | TEACHER | Xoá thẻ |
 
 Mọi lỗi trả về theo format: `{status, code, message, details, path, timestamp}`.
 
-## 8. Quy tắc nghiệp vụ chính
+## 8. Mô hình dữ liệu: ngân hàng câu hỏi
 
+Câu hỏi **không thuộc về đề nào cả** — nó tồn tại độc lập trong bảng `questions`.
+Đề thi chỉ *mượn* câu hỏi thông qua bảng nối `quiz_questions` (quan hệ N-N):
+
+```
+questions ──┬── answer_options   (đáp án của câu, đúng/nhiễu)
+             ├── question_tags ── tags      (gắn nhãn chủ đề)
+             │
+             └── quiz_questions ── quizzes  (đề nào dùng câu này, ở vị trí nào)
+```
+
+Nhờ vậy một câu hỏi tốt có thể dùng lại cho nhiều đề mà **không phải nhân bản**, và sửa
+câu hỏi trong bank sẽ áp dụng cho mọi đề đang mượn nó. Mỗi câu có thêm:
+
+- `difficulty` — `EASY` / `MEDIUM` / `HARD`
+- `type` — `SINGLE_CHOICE` / `MULTIPLE_CHOICE` / `TRUE_FALSE`
+- `tags` — nhãn chủ đề để lọc nhanh
+
+Lịch sử làm bài vẫn an toàn nhờ cơ chế **snapshot**: khi nộp bài, nội dung câu hỏi, đáp án
+đúng, đáp án đã chọn và giải thích đều được chép vào `attempt_answers`. Sau đó sửa câu hỏi
+gốc không làm thay đổi bài đã chấm của học sinh.
+
+> `questions.quiz_id` và `questions.position` vẫn còn (nullable) để tương thích ngược;
+> mọi thứ tự và liên kết hiện đã đi qua `quiz_questions`.
+
+## 9. Quy tắc nghiệp vụ chính
+
+- **Ngân hàng câu hỏi**: không thêm câu vào đề đang `PUBLISHED` (409 `QUIZ_PUBLISHED`),
+  không mượn trùng câu đã có trong đề (409 `ALREADY_LINKED`), gỡ câu chưa từng có trong đề thì 404.
 - **Idempotency**: `attempts.user_id + client_key` UNIQUE; client gửi lại cùng `clientKey`
   trả về attempt cũ (200) thay vì tạo mới. Race được xử lý qua
   `DataIntegrityViolationException`.
@@ -176,7 +249,7 @@ Mọi lỗi trả về theo format: `{status, code, message, details, path, time
 - **DRAFT ẩn với học sinh**: trả 404 để tránh enumeration.
 - **Timer**: server xác nhận `startedAt + durationMin + 30s grace`; về 0 sẽ auto-submit.
 
-## 9. Bảo mật
+## 10. Bảo mật
 
 - BCrypt password hashing, không log hash.
 - JWT HS384, 60 phút, secret từ env.
@@ -186,16 +259,19 @@ Mọi lỗi trả về theo format: `{status, code, message, details, path, time
 - `@PreAuthorize` + SecurityFilterChain (defense-in-depth).
 - **Không commit secret thật vào git.** Có `.env.example` để tham chiếu.
 
-## 10. Đã kiểm thử
+## 11. Đã kiểm thử
 
 | Loại | Phạm vi |
 |------|---------|
 | Unit (backend) | publish checks (5 keys) |
-| Integration (backend, PostgreSQL thật) | auth + role, học sinh không xem được attempt của người khác, DRAFT 404, JSON quiz không có `correct`/`explanation`, chấm điểm đúng, idempotency (cùng + khác clientKey), 422 cho option sai / question sai, duplicate question |
+| Integration — auth & làm bài (backend, PostgreSQL thật) | auth + role, học sinh không xem được attempt của người khác, DRAFT 404, JSON quiz không có `correct`/`explanation`, chấm điểm đúng, idempotency (cùng + khác clientKey), 422 cho option sai / question sai, duplicate question |
+| Integration — ngân hàng câu hỏi (18 case) | tìm theo text không phân biệt hoa thường, lọc theo độ khó, lọc theo thẻ, vòng đời thẻ (tạo trùng → 409, tên trống → 422, xoá), mượn/gỡ câu hỏi giữa nguyên bản trong bank, `usageCount` tăng đúng khi mượn, 1 câu dùng chung cho 2 đề, chặn thêm câu vào đề đang xuất bản, học sinh bị 403, đánh dấu câu đang nằm trong đề xuất bản |
 | Unit (frontend, vitest) | validation schemas (login, register, quiz) |
+
+Tổng backend: **25 test, 25 xanh** (`mvn test`).
 | E2E manual (qua curl/dev server) | flow: giáo viên tạo + publish, học sinh làm + xem kết quả, idempotency race, 401 → /login, 403 trang riêng, theme light/dark, responsive 400/600/860/1280 |
 
-## 11. Có gì CHƯA test / giới hạn đã biết
+## 12. Có gì CHƯA test / giới hạn đã biết
 
 - **Timer auto-submit** chỉ test bằng tay (giảm `durationMin` xuống 1 phút và đợi).
   Có thể thêm test tích hợp riêng với `Clock` mock nếu cần.
@@ -209,7 +285,7 @@ Mọi lỗi trả về theo format: `{status, code, message, details, path, time
   dùng trực tiếp PostgreSQL 16 chạy qua Docker Compose. CI dùng service `postgres`
   chính thức của GitHub Actions.
 
-## 12. Tài liệu liên quan
+## 13. Tài liệu liên quan
 
 - `docs/INTERVIEW.md` — câu hỏi phỏng vấn Java backend kèm câu trả lời ngắn.
 - `docs/ARCHITECTURE.md` — sơ đồ kiến trúc (Mermaid).
@@ -217,7 +293,7 @@ Mọi lỗi trả về theo format: `{status, code, message, details, path, time
 - `docs/DECISIONS.md` — quyết định kỹ thuật kèm lý do.
 - `docs/AUDIT.md` — đánh giá repo khi nhận.
 
-## 13. License
+## 14. License
 
 Mã nguồn mở cho mục đích học tập/portfolio. Không dùng cho production mà chưa review
 bảo mật, scaling, secret rotation.
