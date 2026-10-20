@@ -4,6 +4,8 @@ import com.anhtduong.quiz.common.BusinessException;
 import com.anhtduong.quiz.question.AnswerOptionEntity;
 import com.anhtduong.quiz.question.QuestionEntity;
 import com.anhtduong.quiz.question.QuestionRepository;
+import com.anhtduong.quiz.question.QuizQuestionEntity;
+import com.anhtduong.quiz.question.QuizQuestionRepository;
 import com.anhtduong.quiz.quiz.QuizEntity;
 import com.anhtduong.quiz.quiz.QuizRepository;
 import com.anhtduong.quiz.user.CurrentUser;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class AttemptService {
@@ -31,26 +34,21 @@ public class AttemptService {
     private final QuizRepository quizzes;
     private final AttemptRepository attempts;
     private final UserRepository users;
-
     private final QuestionRepository questions;
+    private final QuizQuestionRepository quizQuestions;
 
-    public AttemptService(QuizRepository quizzes, AttemptRepository attempts, UserRepository users, QuestionRepository questions) {
+    public AttemptService(QuizRepository quizzes,
+                          AttemptRepository attempts,
+                          UserRepository users,
+                          QuestionRepository questions,
+                          QuizQuestionRepository quizQuestions) {
         this.quizzes = quizzes;
         this.attempts = attempts;
         this.users = users;
         this.questions = questions;
+        this.quizQuestions = quizQuestions;
     }
 
-    /**
-     * Học sinh nộp bài. Hàm này chứa tất cả logic chấm điểm phía server:
-     * <ol>
-     *   <li>Idempotency: nếu (user, clientKey) đã có → trả lại attempt cũ, 200.</li>
-     *   <li>Quiz phải PUBLISHED, mở, còn lượt.</li>
-     *   <li>Thời gian làm bài: server xác nhận startedAt + durationMin + grace.</li>
-     *   <li>Validate câu trả lời (câu phải thuộc quiz, đáp án thuộc câu, không trùng).</li>
-     *   <li>Chấm điểm server-side, ghi snapshot, lưu attempt + answers.</li>
-     * </ol>
-     */
     @Transactional
     public AttemptDtos.Brief submit(Long quizId, AttemptDtos.SubmitRequest req) {
         Long userId = CurrentUser.id();
@@ -61,76 +59,59 @@ public class AttemptService {
             throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "VALIDATION_FAILED", "Thiếu clientKey.");
         }
 
-        // 1) Idempotency check: trả về attempt cũ nếu đã nộp với clientKey này.
         Optional<AttemptEntity> existing = attempts.findByUserIdAndClientKey(userId, req.clientKey());
-        if (existing.isPresent()) {
-            return brief(existing.get(), true);
-        }
+        if (existing.isPresent()) return brief(existing.get(), true);
 
-        // 2) Quiz phải tồn tại và PUBLISHED
-        QuizEntity q = quizzes.findWithQuestions(quizId)
+        QuizEntity q = quizzes.findById(quizId)
                 .filter(x -> x.getStatus() == QuizEntity.Status.PUBLISHED)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
-        q.getQuestions().forEach(qq -> qq.getOptions().size());
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
+        List<QuestionEntity> quizQs = loadQuestionsForQuiz(q.getId());
 
-        // 3) Đã đóng cửa?
         if (q.getClosesAt() != null && q.getClosesAt().isBefore(Instant.now())) {
-            throw new BusinessException(HttpStatus.CONFLICT, "QUIZ_CLOSED",
-                    "Bài kiểm tra đã đóng, không nhận bài nữa.");
+            throw new BusinessException(HttpStatus.CONFLICT, "QUIZ_CLOSED", "Bài kiểm tra đã đóng, không nhận bài nữa.");
         }
 
-        // 4) Hết lượt?
         long used = attempts.countByUserIdAndQuizId(userId, q.getId());
         if (used >= q.getMaxAttempts()) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MAX_ATTEMPTS",
-                    "Bạn đã dùng hết số lượt làm bài.");
+            throw new BusinessException(HttpStatus.CONFLICT, "MAX_ATTEMPTS", "Bạn đã dùng hết số lượt làm bài.");
         }
 
-        // 5) Thời gian làm bài: server xác nhận
         Instant started = req.startedAt() == null ? Instant.now() : req.startedAt();
         Instant deadline = started.plus(Duration.ofMinutes(q.getDurationMin())).plus(SUBMIT_GRACE);
         if (Instant.now().isAfter(deadline)) {
-            throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "TIME_EXPIRED",
-                    "Đã quá thời gian làm bài.");
+            throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "TIME_EXPIRED", "Đã quá thời gian làm bài.");
         }
 
-        // 6) Validate answers
         List<AttemptDtos.AnswerInput> raw = req.answers() == null ? List.of() : req.answers();
         Map<Long, QuestionEntity> byQid = new HashMap<>();
-        for (QuestionEntity qe : q.getQuestions()) {
+        for (QuestionEntity qe : quizQs) {
             byQid.put(qe.getId(), qe);
         }
         Set<Long> seen = new HashSet<>();
         Map<Long, AnswerOptionEntity> chosen = new HashMap<>();
         for (AttemptDtos.AnswerInput a : raw) {
             if (a.questionId() == null) {
-                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "INVALID_QUESTION",
-                        "Có câu hỏi không thuộc bài kiểm tra này.");
+                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "INVALID_QUESTION", "Có câu hỏi không thuộc bài kiểm tra này.");
             }
             QuestionEntity qe = byQid.get(a.questionId());
             if (qe == null) {
-                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "INVALID_QUESTION",
-                        "Có câu hỏi không thuộc bài kiểm tra này.");
+                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "INVALID_QUESTION", "Có câu hỏi không thuộc bài kiểm tra này.");
             }
             if (!seen.add(qe.getId())) {
-                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "DUPLICATE_ANSWER",
-                        "Một câu hỏi bị trả lời hai lần.");
+                throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "DUPLICATE_ANSWER", "Một câu hỏi bị trả lời hai lần.");
             }
             if (a.optionId() != null) {
                 AnswerOptionEntity opt = qe.getOptions().stream()
                         .filter(o -> Objects.equals(o.getId(), a.optionId())).findFirst().orElse(null);
                 if (opt == null) {
-                    throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "OPTION_NOT_IN_QUESTION",
-                            "Đáp án được chọn không thuộc câu hỏi tương ứng.");
+                    throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "OPTION_NOT_IN_QUESTION", "Đáp án được chọn không thuộc câu hỏi tương ứng.");
                 }
                 chosen.put(qe.getId(), opt);
             }
         }
 
-        // 7) Build user, attempt, snapshot, chấm điểm
         UserEntity user = users.getReferenceById(userId);
-        int totalQuestions = q.getQuestions().size();
+        int totalQuestions = quizQs.size();
         int score = 0;
         int pos = 0;
         AttemptEntity attempt = new AttemptEntity();
@@ -146,11 +127,10 @@ public class AttemptService {
         attempt.setStartedAt(started);
         attempt.setSubmittedAt(Instant.now());
 
-        List<QuestionEntity> orderedQuestions = new ArrayList<>(q.getQuestions());
-        orderedQuestions.sort(Comparator.comparing(QuestionEntity::getPosition));
+        List<QuestionEntity> orderedQuestions = new ArrayList<>(quizQs);
+        orderedQuestions.sort(Comparator.comparingInt(QuestionEntity::getPosition));
         for (QuestionEntity qe : orderedQuestions) {
-            AnswerOptionEntity correctOpt = qe.getOptions().stream().filter(AnswerOptionEntity::isCorrect)
-                    .findFirst().orElse(null);
+            AnswerOptionEntity correctOpt = qe.getOptions().stream().filter(AnswerOptionEntity::isCorrect).findFirst().orElse(null);
             AnswerOptionEntity chosenOpt = chosen.get(qe.getId());
             boolean isCorrect = chosenOpt != null && correctOpt != null
                     && Objects.equals(chosenOpt.getId(), correctOpt.getId());
@@ -178,11 +158,9 @@ public class AttemptService {
         try {
             attempt = attempts.saveAndFlush(attempt);
         } catch (DataIntegrityViolationException dup) {
-            // Race: người khác (cùng user, cùng clientKey) đã ghi. Lấy attempt cũ.
             log.info("Idempotency race cho user {} clientKey {}", userId, req.clientKey());
             AttemptEntity prev = attempts.findByUserIdAndClientKey(userId, req.clientKey())
-                    .orElseThrow(() -> new BusinessException(HttpStatus.CONFLICT, "DATA_CONFLICT",
-                            "Dữ liệu bị xung đột."));
+                    .orElseThrow(() -> new BusinessException(HttpStatus.CONFLICT, "DATA_CONFLICT", "Dữ liệu bị xung đột."));
             return brief(prev, true);
         }
         return brief(attempt, false);
@@ -192,11 +170,9 @@ public class AttemptService {
     public AttemptDtos.Detail get(Long attemptId) {
         Long userId = CurrentUser.id();
         AttemptEntity a = attempts.findById(attemptId).orElseThrow(() ->
-                new BusinessException(HttpStatus.NOT_FOUND, "ATTEMPT_NOT_FOUND",
-                        "Không tìm thấy bài làm."));
+                new BusinessException(HttpStatus.NOT_FOUND, "ATTEMPT_NOT_FOUND", "Không tìm thấy bài làm."));
         if (!Objects.equals(a.getUser().getId(), userId)) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "NOT_YOUR_ATTEMPT",
-                    "Bạn chỉ xem được kết quả bài làm của chính mình.");
+            throw new BusinessException(HttpStatus.FORBIDDEN, "NOT_YOUR_ATTEMPT", "Bạn chỉ xem được kết quả bài làm của chính mình.");
         }
         AttemptDtos.Detail d = new AttemptDtos.Detail();
         d.id = a.getId();
@@ -216,9 +192,8 @@ public class AttemptService {
         boolean open = q.getStatus() == QuizEntity.Status.PUBLISHED
                 && (q.getClosesAt() == null || q.getClosesAt().isAfter(Instant.now()));
         d.canRetry = open && d.attemptsLeft > 0;
-        // Load questions + options for review (1 truy vấn cho cả attempt)
-        java.util.Map<Long, QuestionEntity> qById = questions.findByQuizIdOrderByPositionAsc(q.getId()).stream()
-                .collect(java.util.stream.Collectors.toMap(QuestionEntity::getId, x -> x));
+        List<QuestionEntity> quizQs = loadQuestionsForQuiz(q.getId());
+        Map<Long, QuestionEntity> qById = quizQs.stream().collect(Collectors.toMap(QuestionEntity::getId, x -> x));
         d.items = a.getAnswers().stream()
                 .sorted(Comparator.comparingInt(AttemptAnswerEntity::getPosition))
                 .map(aa -> toReview(aa, qById))
@@ -226,7 +201,7 @@ public class AttemptService {
         return d;
     }
 
-    private AttemptDtos.ReviewQuestion toReview(AttemptAnswerEntity aa, java.util.Map<Long, QuestionEntity> qById) {
+    private AttemptDtos.ReviewQuestion toReview(AttemptAnswerEntity aa, Map<Long, QuestionEntity> qById) {
         AttemptDtos.ReviewQuestion r = new AttemptDtos.ReviewQuestion();
         r.questionId = aa.getQuestionIdSnapshot();
         r.text = aa.getQuestionText();
@@ -235,19 +210,16 @@ public class AttemptService {
         r.explanation = aa.getExplanationSnapshot();
         r.answered = aa.getChosenOptionId() != null;
         r.correct = r.answered && Objects.equals(aa.getChosenOptionId(), aa.getCorrectOptionId());
-        // Lấy options từ question (hiện tại - trade-off: nếu giáo viên sửa, review dùng bản mới).
-        // TODO: snapshot toàn bộ options vào attempt_answers để bảo toàn lịch sử.
         QuestionEntity q = qById.get(aa.getQuestionIdSnapshot());
         if (q != null) {
             r.options = q.getOptions().stream()
-                    .sorted(java.util.Comparator.comparingInt(AnswerOptionEntity::getPosition))
+                    .sorted(Comparator.comparingInt(AnswerOptionEntity::getPosition))
                     .map(o -> {
                         AttemptDtos.ReviewOption ro = new AttemptDtos.ReviewOption();
                         ro.id = o.getId();
                         ro.text = o.getText();
                         ro.correct = o.isCorrect();
-                        ro.chosen = aa.getChosenOptionId() != null
-                                && Objects.equals(o.getId(), aa.getChosenOptionId());
+                        ro.chosen = aa.getChosenOptionId() != null && Objects.equals(o.getId(), aa.getChosenOptionId());
                         return ro;
                     })
                     .toList();
@@ -285,6 +257,21 @@ public class AttemptService {
             return it;
         }).toList();
         return out;
+    }
+
+    private List<QuestionEntity> loadQuestionsForQuiz(Long quizId) {
+        List<QuizQuestionEntity> mappings = quizQuestions.findByQuizIdOrdered(quizId);
+        if (mappings.isEmpty()) return List.of();
+        List<Long> qids = mappings.stream().map(QuizQuestionEntity::getQuestionId).toList();
+        Map<Long, QuestionEntity> byId = questions.findAllById(qids).stream()
+                .collect(Collectors.toMap(QuestionEntity::getId, x -> x));
+        List<QuestionEntity> result = new ArrayList<>();
+        for (QuizQuestionEntity m : mappings) {
+            QuestionEntity qe = byId.get(m.getQuestionId());
+            if (qe != null) result.add(qe);
+        }
+        result.forEach(qe -> qe.getOptions().size());
+        return result;
     }
 
     private AttemptDtos.Brief brief(AttemptEntity a, boolean duplicate) {

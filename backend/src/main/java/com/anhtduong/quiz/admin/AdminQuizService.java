@@ -6,6 +6,8 @@ import com.anhtduong.quiz.common.BusinessException;
 import com.anhtduong.quiz.question.AnswerOptionEntity;
 import com.anhtduong.quiz.question.QuestionEntity;
 import com.anhtduong.quiz.question.QuestionRepository;
+import com.anhtduong.quiz.question.QuizQuestionEntity;
+import com.anhtduong.quiz.question.QuizQuestionRepository;
 import com.anhtduong.quiz.quiz.QuizEntity;
 import com.anhtduong.quiz.quiz.QuizRepository;
 import org.springframework.http.HttpStatus;
@@ -20,27 +22,36 @@ public class AdminQuizService {
 
     private final QuizRepository quizzes;
     private final QuestionRepository questions;
+    private final QuizQuestionRepository quizQuestions;
     private final AttemptRepository attempts;
 
-    public AdminQuizService(QuizRepository quizzes, QuestionRepository questions, AttemptRepository attempts) {
+    public AdminQuizService(QuizRepository quizzes,
+                            QuestionRepository questions,
+                            QuizQuestionRepository quizQuestions,
+                            AttemptRepository attempts) {
         this.quizzes = quizzes;
         this.questions = questions;
+        this.quizQuestions = quizQuestions;
         this.attempts = attempts;
     }
 
+    /* ---------------- đọc ---------------- */
+
     @Transactional(readOnly = true)
     public List<AdminQuizDtos.AdminSummary> list() {
-        return quizzes.findAll().stream().sorted(Comparator.comparing(QuizEntity::getUpdatedAt).reversed())
+        return quizzes.findAll().stream()
+                .sorted(Comparator.comparing(QuizEntity::getUpdatedAt).reversed())
                 .map(this::toSummary).toList();
     }
 
     @Transactional(readOnly = true)
     public AdminQuizDtos.AdminFull get(Long id) {
-        QuizEntity q = quizzes.findWithQuestions(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
+        QuizEntity q = quizzes.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
         return toFull(q);
     }
+
+    /* ---------------- CRUD ---------------- */
 
     @Transactional
     public AdminQuizDtos.AdminFull create(AdminQuizDtos.QuizUpsertRequest req) {
@@ -54,18 +65,16 @@ public class AdminQuizService {
     @Transactional
     public AdminQuizDtos.AdminFull update(Long id, AdminQuizDtos.QuizUpsertRequest req) {
         validateBasics(req);
-        QuizEntity q = quizzes.findWithQuestions(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
+        QuizEntity q = quizzes.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
         apply(q, req);
         return toFull(q);
     }
 
     @Transactional
     public AdminQuizDtos.AdminFull publish(Long id) {
-        QuizEntity q = quizzes.findWithQuestions(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
+        QuizEntity q = quizzes.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
         List<AdminQuizDtos.CheckItem> checks = publishChecks(q);
         List<AdminQuizDtos.CheckItem> fails = checks.stream().filter(c -> !c.ok()).toList();
         if (!fails.isEmpty()) {
@@ -82,47 +91,57 @@ public class AdminQuizService {
     @Transactional
     public AdminQuizDtos.AdminFull unpublish(Long id) {
         QuizEntity q = quizzes.findById(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
         q.setStatus(QuizEntity.Status.DRAFT);
         return toFull(q);
     }
 
+    /**
+     * Tạo CÂU HỎI MỚI trong ngân hàng + tự động liên kết vào quiz.
+     */
     @Transactional
     public AdminQuizDtos.AdminFull addQuestion(Long quizId, AdminQuizDtos.QuestionUpsertRequest req) {
-        QuizEntity q = quizzes.findWithQuestions(quizId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
+        QuizEntity q = quizzes.findById(quizId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
         validateQuestion(req, q);
         QuestionEntity qe = new QuestionEntity();
-        qe.setQuiz(q);
         qe.setText(req.text().trim());
         qe.setExplanation(req.explanation() == null ? null : req.explanation().trim());
-        qe.setPosition(q.getQuestions().size());
+        long cnt = quizQuestions.countByQuizId(quizId);
+        int pos = (int) cnt;
+        qe.setPosition(pos);
         int i = 0;
         for (AdminQuizDtos.OptionInput o : req.options()) {
             AnswerOptionEntity opt = new AnswerOptionEntity();
-            opt.setQuestion(qe);
             opt.setText(o.text().trim());
             opt.setCorrect(o.correct());
             opt.setPosition(i++);
             qe.getOptions().add(opt);
         }
-        q.getQuestions().add(qe);
+        qe = questions.save(qe);
+        QuizQuestionEntity qq = new QuizQuestionEntity();
+        qq.setQuizId(q.getId());
+        qq.setQuestionId(qe.getId());
+        qq.setPosition(pos);
+        quizQuestions.save(qq);
         return toFull(q);
     }
 
+    /**
+     * Sửa câu hỏi. Vì giờ thuộc ngân hàng chung, sửa sẽ ảnh hưởng TẤT CẢ quiz đang dùng nó.
+     */
     @Transactional
     public AdminQuizDtos.AdminFull updateQuestion(Long questionId, AdminQuizDtos.QuestionUpsertRequest req) {
         QuestionEntity qe = questions.findFullById(questionId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUESTION_NOT_FOUND",
-                        "Không tìm thấy câu hỏi."));
-        qe.getOptions().size();
-        QuizEntity q = qe.getQuiz();
-        boolean locked = attempts.existsByQuizId(q.getId());
-        validateQuestion(req, q);
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUESTION_NOT_FOUND", "Không tìm thấy câu hỏi."));
+        // Kiểm tra nếu có quiz nào đang dùng câu này
+        boolean lockedByAttempts = isQuestionUsedInAttempts(qe);
+        // Lấy 1 quiz bất kỳ đang dùng câu này để validate
+        Optional<QuizEntity> anyQuiz = findAnyQuizUsing(qe.getId());
+        if (anyQuiz.isPresent()) validateQuestion(req, anyQuiz.get());
+        else validateQuestion(req, null);
 
-        if (locked) {
+        if (lockedByAttempts) {
             Set<Long> currentIds = new HashSet<>();
             for (AnswerOptionEntity o : qe.getOptions()) currentIds.add(o.getId());
             Set<Long> nextIds = new HashSet<>();
@@ -131,7 +150,7 @@ public class AdminQuizService {
             }
             if (!currentIds.equals(nextIds)) {
                 throw new BusinessException(HttpStatus.CONFLICT, "QUIZ_HAS_ATTEMPTS",
-                        "Đã có học sinh làm bài nên không được xóa đáp án.");
+                        "Đã có học sinh làm bài nên không được xoá đáp án.");
             }
             Long currentCorrect = qe.getOptions().stream().filter(AnswerOptionEntity::isCorrect)
                     .map(AnswerOptionEntity::getId).findFirst().orElse(null);
@@ -146,7 +165,6 @@ public class AdminQuizService {
         qe.setText(req.text().trim());
         qe.setExplanation(req.explanation() == null ? null : req.explanation().trim());
 
-        // Đồng bộ options: nếu option có id tồn tại -> cập nhật text; nếu không -> tạo mới.
         Map<Long, AnswerOptionEntity> existing = new HashMap<>();
         for (AnswerOptionEntity o : qe.getOptions()) existing.put(o.getId(), o);
         Set<Long> keep = new HashSet<>();
@@ -165,40 +183,62 @@ public class AdminQuizService {
             o.setPosition(pos++);
             keep.add(o.getId() == null ? -1L : o.getId());
         }
-        // Xoá options cũ không còn (chỉ khi không bị lock)
-        if (!locked) {
+        if (!lockedByAttempts) {
             qe.getOptions().removeIf(o -> o.getId() != null && !keep.contains(o.getId()));
         }
+
+        // Trả về 1 quiz có chứa câu này
+        QuizEntity q = anyQuiz.orElseThrow(() ->
+                new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Câu hỏi không thuộc quiz nào."));
         return toFull(q);
     }
 
+    /**
+     * Xoá câu hỏi khỏi ngân hàng. Cascade sẽ gỡ liên kết khỏi tất cả quiz.
+     * (Chỉ chặn nếu quiz đã có attempts hoặc là câu cuối cùng của quiz PUBLISHED.)
+     */
     @Transactional
     public AdminQuizDtos.AdminFull deleteQuestion(Long questionId) {
         QuestionEntity qe = questions.findFullById(questionId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUESTION_NOT_FOUND",
-                        "Không tìm thấy câu hỏi."));
-        qe.getOptions().size();
-        QuizEntity q = qe.getQuiz();
-        if (attempts.existsByQuizId(q.getId())) {
-            throw new BusinessException(HttpStatus.CONFLICT, "QUIZ_HAS_ATTEMPTS",
-                    "Đã có học sinh làm bài nên không được xóa câu hỏi.");
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUESTION_NOT_FOUND", "Không tìm thấy câu hỏi."));
+        List<QuizQuestionEntity> mappings = quizQuestions.findAll().stream()
+                .filter(m -> Objects.equals(m.getQuestionId(), qe.getId())).toList();
+        if (mappings.isEmpty()) {
+            questions.delete(qe);
+            return list().isEmpty() ? toFull(makeStub()) : toFull(quizzes.findAll().get(0));
         }
-        if (q.getStatus() == QuizEntity.Status.PUBLISHED && q.getQuestions().size() <= 1) {
+        if (attempts.existsByQuizId(mappings.get(0).getQuizId())) {
+            throw new BusinessException(HttpStatus.CONFLICT, "QUIZ_HAS_ATTEMPTS",
+                    "Đã có học sinh làm bài nên không được xoá câu hỏi.");
+        }
+        Optional<QuizEntity> firstQuiz = quizzes.findById(mappings.get(0).getQuizId());
+        if (firstQuiz.isPresent() && firstQuiz.get().getStatus() == QuizEntity.Status.PUBLISHED
+                && mappings.stream().filter(m -> m.getQuizId().equals(firstQuiz.get().getId())).count() <= 1) {
             throw new BusinessException(HttpStatus.CONFLICT, "LAST_QUESTION",
                     "Bài đang xuất bản cần ít nhất 1 câu hỏi. Hãy gỡ xuất bản trước.");
         }
-        q.getQuestions().remove(qe);
-        // re-number positions
-        int i = 0;
-        for (QuestionEntity x : q.getQuestions()) x.setPosition(i++);
-        return toFull(q);
+        mappings.forEach(quizQuestions::delete);
+        questions.delete(qe);
+        return firstQuiz.map(this::toFull).orElseGet(() -> toFull(quizzes.findAll().get(0)));
+    }
+
+    private boolean isQuestionUsedInAttempts(QuestionEntity qe) {
+        return quizQuestions.findAll().stream()
+                .filter(m -> Objects.equals(m.getQuestionId(), qe.getId()))
+                .anyMatch(m -> attempts.existsByQuizId(m.getQuizId()));
+    }
+
+    private Optional<QuizEntity> findAnyQuizUsing(Long questionId) {
+        List<QuizQuestionEntity> ms = quizQuestions.findAll().stream()
+                .filter(m -> Objects.equals(m.getQuestionId(), questionId)).toList();
+        if (ms.isEmpty()) return Optional.empty();
+        return quizzes.findById(ms.get(0).getQuizId());
     }
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> attemptsForQuiz(Long quizId) {
         QuizEntity q = quizzes.findById(quizId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
-                        "Không tìm thấy bài kiểm tra."));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND", "Không tìm thấy bài kiểm tra."));
         List<AttemptEntity> list = attempts.findByQuizOrdered(quizId);
         List<Map<String, Object>> out = new ArrayList<>();
         for (AttemptEntity a : list) {
@@ -228,6 +268,31 @@ public class AdminQuizService {
 
     /* ---------------- helpers ---------------- */
 
+    private QuizEntity makeStub() {
+        QuizEntity q = new QuizEntity();
+        q.setTitle("");
+        q.setStatus(QuizEntity.Status.DRAFT);
+        q.setDurationMin(1);
+        q.setMaxAttempts(1);
+        q.setPassPct(0);
+        return q;
+    }
+
+    private List<QuestionEntity> loadQuestionsForQuiz(Long quizId) {
+        List<QuizQuestionEntity> mappings = quizQuestions.findByQuizIdOrdered(quizId);
+        if (mappings.isEmpty()) return List.of();
+        List<Long> qids = mappings.stream().map(QuizQuestionEntity::getQuestionId).toList();
+        Map<Long, QuestionEntity> byId = questions.findAllById(qids).stream()
+                .collect(java.util.stream.Collectors.toMap(QuestionEntity::getId, x -> x));
+        List<QuestionEntity> result = new ArrayList<>();
+        for (QuizQuestionEntity m : mappings) {
+            QuestionEntity qe = byId.get(m.getQuestionId());
+            if (qe != null) result.add(qe);
+        }
+        result.forEach(qe -> qe.getOptions().size());
+        return result;
+    }
+
     private void apply(QuizEntity q, AdminQuizDtos.QuizUpsertRequest req) {
         q.setTitle(req.title().trim());
         q.setDescription(req.description() == null ? "" : req.description().trim());
@@ -248,7 +313,7 @@ public class AdminQuizService {
 
     private void validateQuestion(AdminQuizDtos.QuestionUpsertRequest req, QuizEntity q) {
         long correct = req.options().stream().filter(AdminQuizDtos.OptionInput::correct).count();
-        if (q.getStatus() == QuizEntity.Status.PUBLISHED && correct != 1) {
+        if (q != null && q.getStatus() == QuizEntity.Status.PUBLISHED && correct != 1) {
             throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, "VALIDATION_FAILED",
                     "Câu hỏi chưa hợp lệ.",
                     Map.of("correct", "Bài đang xuất bản nên câu hỏi phải có đúng 1 đáp án đúng."));
@@ -257,23 +322,21 @@ public class AdminQuizService {
 
     private List<AdminQuizDtos.CheckItem> publishChecks(QuizEntity q) {
         List<AdminQuizDtos.CheckItem> out = new ArrayList<>();
+        List<QuestionEntity> qs = loadQuestionsForQuiz(q.getId());
         out.add(new AdminQuizDtos.CheckItem("title", "Bài có tên (từ 3 ký tự)",
                 q.getTitle() != null && q.getTitle().trim().length() >= 3, null));
-        out.add(new AdminQuizDtos.CheckItem("questions", "Có ít nhất 1 câu hỏi",
-                !q.getQuestions().isEmpty(), null));
+        out.add(new AdminQuizDtos.CheckItem("questions", "Có ít nhất 1 câu hỏi", !qs.isEmpty(), null));
         List<Integer> few = new ArrayList<>();
         List<Integer> noc = new ArrayList<>();
         int i = 1;
-        for (QuestionEntity x : q.getQuestions()) {
+        for (QuestionEntity x : qs) {
             if (x.getOptions().size() < 2) few.add(i);
             long correct = x.getOptions().stream().filter(AnswerOptionEntity::isCorrect).count();
             if (correct != 1) noc.add(i);
             i++;
         }
-        out.add(new AdminQuizDtos.CheckItem("options", "Mỗi câu có ít nhất 2 đáp án",
-                few.isEmpty(), listDetail(few)));
-        out.add(new AdminQuizDtos.CheckItem("correct", "Mỗi câu có đúng 1 đáp án đúng",
-                noc.isEmpty(), listDetail(noc)));
+        out.add(new AdminQuizDtos.CheckItem("options", "Mỗi câu có ít nhất 2 đáp án", few.isEmpty(), listDetail(few)));
+        out.add(new AdminQuizDtos.CheckItem("correct", "Mỗi câu có đúng 1 đáp án đúng", noc.isEmpty(), listDetail(noc)));
         out.add(new AdminQuizDtos.CheckItem("deadline", "Hạn đóng bài chưa qua",
                 q.getClosesAt() == null || q.getClosesAt().isAfter(Instant.now()), null));
         return out;
@@ -296,10 +359,10 @@ public class AdminQuizService {
         s.title = q.getTitle();
         s.subject = q.getSubject();
         s.status = q.getStatus().name();
-        s.questionCount = q.getQuestions().size();
+        s.questionCount = (int) quizQuestions.countByQuizId(q.getId());
         s.attemptCount = attempts.countByQuizId(q.getId());
         Double avg = attempts.avgPercentByQuiz(q.getId());
-        s.avgPercent = avg == null ? null : (int) Math.round(avg);
+        s.avgPercent = avg == null ? null : (int) Math.round(avg.doubleValue());
         s.closesAt = q.getClosesAt();
         s.updatedAt = q.getUpdatedAt();
         return s;
@@ -320,7 +383,8 @@ public class AdminQuizService {
         f.attemptCount = attempts.countByQuizId(q.getId());
         f.locked = f.attemptCount > 0;
         f.questions = new ArrayList<>();
-        for (QuestionEntity qe : q.getQuestions()) {
+        List<QuestionEntity> qs = loadQuestionsForQuiz(q.getId());
+        for (QuestionEntity qe : qs) {
             AdminQuizDtos.AdminQuestion aq = new AdminQuizDtos.AdminQuestion();
             aq.id = qe.getId();
             aq.text = qe.getText();

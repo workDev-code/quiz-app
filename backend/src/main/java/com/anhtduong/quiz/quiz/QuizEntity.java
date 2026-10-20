@@ -2,8 +2,6 @@ package com.anhtduong.quiz.quiz;
 
 import jakarta.persistence.*;
 import java.time.Instant;
-import java.util.ArrayList;
-import com.anhtduong.quiz.question.QuestionEntity;
 import java.util.List;
 
 @Entity
@@ -44,10 +42,6 @@ public class QuizEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    @OneToMany(mappedBy = "quiz", cascade = CascadeType.ALL, orphanRemoval = true)
-    @OrderBy("position ASC")
-    private List<QuestionEntity> questions = new ArrayList<>();
-
     public enum Status { DRAFT, PUBLISHED }
 
     @PrePersist
@@ -83,6 +77,4 @@ public class QuizEntity {
     public void setCreatedAt(Instant t) { this.createdAt = t; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant t) { this.updatedAt = t; }
-    public List<QuestionEntity> getQuestions() { return questions; }
-    public void setQuestions(List<QuestionEntity> questions) { this.questions = questions; }
 }

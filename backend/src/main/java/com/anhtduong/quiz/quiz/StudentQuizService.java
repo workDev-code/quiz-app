@@ -3,7 +3,11 @@ package com.anhtduong.quiz.quiz;
 import com.anhtduong.quiz.attempt.AttemptEntity;
 import com.anhtduong.quiz.attempt.AttemptRepository;
 import com.anhtduong.quiz.common.BusinessException;
+import com.anhtduong.quiz.question.AnswerOptionEntity;
 import com.anhtduong.quiz.question.QuestionEntity;
+import com.anhtduong.quiz.question.QuestionRepository;
+import com.anhtduong.quiz.question.QuizQuestionEntity;
+import com.anhtduong.quiz.question.QuizQuestionRepository;
 import com.anhtduong.quiz.user.CurrentUser;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -11,16 +15,26 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class StudentQuizService {
     private final QuizRepository quizzes;
     private final AttemptRepository attempts;
+    private final QuestionRepository questions;
+    private final QuizQuestionRepository quizQuestions;
 
-    public StudentQuizService(QuizRepository quizzes, AttemptRepository attempts) {
+    public StudentQuizService(QuizRepository quizzes,
+                              AttemptRepository attempts,
+                              QuestionRepository questions,
+                              QuizQuestionRepository quizQuestions) {
         this.quizzes = quizzes;
         this.attempts = attempts;
+        this.questions = questions;
+        this.quizQuestions = quizQuestions;
     }
 
     @Transactional(readOnly = true)
@@ -33,13 +47,14 @@ public class StudentQuizService {
     @Transactional(readOnly = true)
     public StudentDtos.Detail detail(Long quizId) {
         Long userId = CurrentUser.id();
-        QuizEntity q = quizzes.findWithQuestions(quizId)
+        QuizEntity q = quizzes.findById(quizId)
                 .filter(x -> x.getStatus() == QuizEntity.Status.PUBLISHED)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "QUIZ_NOT_FOUND",
                         "Không tìm thấy bài kiểm tra."));
-        q.getQuestions().forEach(qq -> qq.getOptions().size());
         StudentDtos.Summary sum = toSummary(q, userId);
-        boolean hasQuestions = !q.getQuestions().isEmpty();
+        // Load questions via ngân hàng mapping
+        List<QuestionEntity> qs = loadQuestionsForQuiz(q.getId());
+        boolean hasQuestions = !qs.isEmpty();
         boolean canStart = hasQuestions && sum.available && sum.attemptsUsed < sum.maxAttempts;
 
         String unavailableReason = null;
@@ -56,9 +71,28 @@ public class StudentQuizService {
         d.unavailableReason = unavailableReason;
         d.canStart = canStart;
         if (canStart) {
-            d.questions = q.getQuestions().stream().map(this::toPublicQuestion).toList();
+            d.questions = qs.stream().map(this::toPublicQuestion).toList();
         }
         return d;
+    }
+
+    private List<QuestionEntity> loadQuestionsForQuiz(Long quizId) {
+        // 1. Lấy IDs qua mapping
+        List<QuizQuestionEntity> mappings = quizQuestions.findByQuizIdOrdered(quizId);
+        if (mappings.isEmpty()) return List.of();
+        List<Long> qids = mappings.stream().map(QuizQuestionEntity::getQuestionId).toList();
+        // 2. Load questions + options (1 truy vấn)
+        Map<Long, QuestionEntity> byId = questions.findAllById(qids).stream()
+                .collect(Collectors.toMap(QuestionEntity::getId, qe -> qe));
+        // 3. Trả về theo đúng thứ tự position
+        List<QuestionEntity> ordered = new ArrayList<>();
+        for (QuizQuestionEntity m : mappings) {
+            QuestionEntity qe = byId.get(m.getQuestionId());
+            if (qe != null) ordered.add(qe);
+        }
+        // Force load options
+        ordered.forEach(qq -> qq.getOptions().size());
+        return ordered;
     }
 
     private StudentDtos.PublicQuestion toPublicQuestion(QuestionEntity q) {
@@ -81,12 +115,15 @@ public class StudentQuizService {
         }
         boolean open = q.getStatus() == QuizEntity.Status.PUBLISHED
                 && (q.getClosesAt() == null || q.getClosesAt().isAfter(Instant.now()));
+        // Đếm số câu qua mapping
+        long qCount = quizQuestions.countByQuizId(q.getId());
+
         StudentDtos.Summary s = new StudentDtos.Summary();
         s.id = q.getId();
         s.title = q.getTitle();
         s.description = q.getDescription();
         s.subject = q.getSubject();
-        s.questionCount = q.getQuestions().size();
+        s.questionCount = (int) qCount;
         s.durationMin = q.getDurationMin();
         s.maxAttempts = q.getMaxAttempts();
         s.passPct = q.getPassPct();
