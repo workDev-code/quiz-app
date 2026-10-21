@@ -25,7 +25,7 @@ export interface QuizDetail {
 export interface PublicQuestion { id: number; text: string; options: { id: number; text: string }[] }
 
 export interface AdminOption { id: number; text: string; correct: boolean }
-export interface AdminQuestion { id: number; text: string; explanation: string | null; options: AdminOption[]; correctId: number | null }
+export interface AdminQuestion { id: number; text: string; explanation: string | null; difficulty: Difficulty; options: AdminOption[]; correctId: number | null }
 export interface AdminCheck { key: string; label: string; ok: boolean; detail: string }
 export interface AdminFull {
   id: number; title: string; description: string; subject: string;
@@ -74,3 +74,24 @@ export interface Dashboard {
 }
 
 export interface TeacherStats { publishedCount: number; draftCount: number; attemptCount: number }
+
+/* ---- Ngân hàng câu hỏi ---- */
+
+export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD'
+
+export interface BankTag { id: number; name: string }
+export interface BankOption { id: number; text: string; correct: boolean }
+
+export interface BankItem {
+  id: number
+  text: string
+  difficulty: Difficulty
+  type: string
+  explanation: string | null
+  options: BankOption[]
+  tags: BankTag[]
+  /** Số đề đang mượn câu hỏi này. */
+  usageCount: number
+  /** Câu hỏi đang nằm trong ít nhất một đề đã xuất bản. */
+  usedInPublishedQuiz: boolean
+}

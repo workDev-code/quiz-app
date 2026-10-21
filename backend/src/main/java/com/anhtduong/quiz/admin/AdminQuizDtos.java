@@ -30,6 +30,7 @@ public class AdminQuizDtos {
         public Long id;
         public String text;
         public String explanation;
+        public String difficulty;      // EASY / MEDIUM / HARD
         public List<AdminOption> options;
         public Long correctId;
     }

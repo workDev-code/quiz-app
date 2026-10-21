@@ -18,3 +18,17 @@ export function attemptsPill(left: number) {
   if (left === 0) return <Pill tone="warn">Hết lượt</Pill>
   return <Pill tone="good">Còn {left} lượt</Pill>
 }
+
+export function difficultyPill(d: string) {
+  if (d === 'EASY') return <Pill tone="good">Dễ</Pill>
+  if (d === 'HARD') return <Pill tone="bad">Khó</Pill>
+  return <Pill tone="warn">Trung bình</Pill>
+}
+
+export function questionTypeLabel(t: string) {
+  switch (t) {
+    case 'MULTIPLE_CHOICE': return 'Chọn nhiều'
+    case 'TRUE_FALSE': return 'Đúng / Sai'
+    default: return 'Chọn một'
+  }
+}

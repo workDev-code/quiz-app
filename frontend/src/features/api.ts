@@ -1,7 +1,7 @@
 import api, { ApiCallError } from '@/lib/api'
 import type {
   QuizSummary, QuizDetail, AdminFull, AdminSummary, AdminQuestion, AttemptBrief,
-  AttemptDetail, AttemptHistoryPage, Dashboard, TeacherStats
+  AttemptDetail, AttemptHistoryPage, Dashboard, TeacherStats, BankItem, BankTag
 } from '@/lib/types'
 import type { AuthUser } from '@/lib/auth'
 
@@ -47,6 +47,30 @@ export const teacher = {
   async updateQuestion(questionId: number, body: unknown) { const r = await api.put<AdminFull>(`/admin/questions/${questionId}`, body); return r.data },
   async deleteQuestion(questionId: number) { const r = await api.delete<AdminFull>(`/admin/questions/${questionId}`); return r.data },
   async attempts(quizId: number) { const r = await api.get<{ quiz: { id: number; title: string; passPct: number; questionCount: number }, items: unknown[] }>(`/admin/quizzes/${quizId}/attempts`); return r.data }
+}
+
+/**
+ * Ngân hàng câu hỏi: câu hỏi tồn tại độc lập, đề chỉ "mượn" qua quiz_questions.
+ */
+export const bank = {
+  async search(params: { search?: string; difficulty?: string; tagId?: number | null } = {}) {
+    // Chỉ gửi bộ lọc thật sự có - backend bỏ qua tham số rỗng.
+    const qs: Record<string, string> = {}
+    if (params.search?.trim()) qs.search = params.search.trim()
+    if (params.difficulty) qs.difficulty = params.difficulty
+    if (params.tagId != null) qs.tagId = String(params.tagId)
+    const r = await api.get<BankItem[]>('/admin/questions', { params: qs })
+    return r.data
+  },
+  async tags() { const r = await api.get<BankTag[]>('/admin/tags'); return r.data },
+  async createTag(name: string) { const r = await api.post<BankTag>('/admin/tags', { name }); return r.data },
+  async deleteTag(id: number) { await api.delete(`/admin/tags/${id}`) },
+  async linkToQuiz(quizId: number, questionId: number) {
+    await api.post(`/admin/quizzes/${quizId}/questions/${questionId}`)
+  },
+  async unlinkFromQuiz(quizId: number, questionId: number) {
+    await api.delete(`/admin/quizzes/${quizId}/questions/${questionId}`)
+  }
 }
 
 export { ApiCallError }

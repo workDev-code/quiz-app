@@ -3,12 +3,12 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { teacher } from '@/features/api'
+import { bank, teacher } from '@/features/api'
 import { Skeleton } from '@/components/Skeleton'
 import { Banner } from '@/components/Banner'
 import { Button } from '@/components/Button'
 import { Field, TextInput, TextArea, Select } from '@/components/Field'
-import { Pill, statusPill } from '@/components/Pill'
+import { Pill, statusPill, difficultyPill } from '@/components/Pill'
 import { Modal } from '@/components/Modal'
 import { quizSchema, questionSchema, type QuizInput, type QuestionInput } from '@/features/validation'
 import { ApiCallError } from '@/lib/api'
@@ -30,6 +30,19 @@ export default function QuizEditPage() {
   const [confirmUnpublish, setConfirmUnpublish] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const [pubErrs, setPubErrs] = useState<{ label: string; detail: string }[] | null>(null)
+  const [pickOpen, setPickOpen] = useState(false)
+  const [confirmUnlink, setConfirmUnlink] = useState<number | null>(null)
+
+  const unlinkMut = useMutation({
+    mutationFn: (qid: number) => bank.unlinkFromQuiz(quizId!, qid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-quiz', quizId] })
+      qc.invalidateQueries({ queryKey: ['question-bank'] })
+      qc.invalidateQueries({ queryKey: ['teacher-quizzes'] })
+      toast('Đã gỡ khỏi bài (câu hỏi vẫn còn trong ngân hàng)', 'good')
+    },
+    onError: (e) => { if (e instanceof ApiCallError) toast(e.message, 'bad') }
+  })
 
   const detailQ = useQuery({
     queryKey: ['admin-quiz', quizId],
@@ -129,7 +142,14 @@ export default function QuizEditPage() {
         </form>
       )}
       {tab === 'questions' && d ? (
-        <QuestionEditor d={d} editingQ={editingQ} setEditingQ={setEditingQ} onDelete={(qid) => setConfirmDelete(qid)} />
+        <QuestionEditor
+          d={d}
+          editingQ={editingQ}
+          setEditingQ={setEditingQ}
+          onDelete={(qid) => setConfirmDelete(qid)}
+          onUnlink={(qid) => setConfirmUnlink(qid)}
+          onOpenBank={() => setPickOpen(true)}
+        />
       ) : null}
       {tab === 'publish' && d ? (
         <PublishTab d={d} onPublish={() => { setPubErrs(null); publishMut.mutate() }} onUnpublish={() => setConfirmUnpublish(true)}
@@ -142,6 +162,20 @@ export default function QuizEditPage() {
         </>}>
         <p>Bài sẽ chuyển về <strong>Bản nháp</strong>. Học sinh sẽ không thể vào làm bài, các lượt đã nộp vẫn giữ nguyên.</p>
       </Modal>
+      <Modal open={confirmUnlink != null} onClose={() => setConfirmUnlink(null)} title="Gỡ câu hỏi khỏi bài này?"
+        footer={<>
+          <Button onClick={() => setConfirmUnlink(null)}>Huỷ</Button>
+          <Button variant="danger" disabled={unlinkMut.isPending} onClick={() => {
+            if (confirmUnlink == null) return
+            unlinkMut.mutate(confirmUnlink)
+            setConfirmUnlink(null)
+          }}>Gỡ khỏi bài</Button>
+        </>}>
+        <p>Câu hỏi sẽ không còn trong bài này nhưng <strong>vẫn được giữ trong ngân hàng câu hỏi</strong>, các bài khác dùng nó cũng không bị ảnh hưởng.</p>
+      </Modal>
+
+      <PickFromBankModal open={pickOpen} onClose={() => setPickOpen(false)} quizId={quizId!} />
+
       <Modal open={confirmDelete != null} onClose={() => setConfirmDelete(null)} title="Xoá câu hỏi này?"
         footer={<>
           <Button onClick={() => setConfirmDelete(null)}>Huỷ</Button>
@@ -155,13 +189,24 @@ export default function QuizEditPage() {
             }).catch((e) => { if (e instanceof ApiCallError) toast(e.message, 'bad'); setConfirmDelete(null) })
           }}>Xoá</Button>
         </>}>
-        <p>Hành động này không thể hoàn tác. Nếu bài đã có lượt làm, máy chủ sẽ từ chối.</p>
+        <p>
+          Hành động này <strong>xoá câu hỏi khỏi ngân hàng</strong> — tức là gỡ khỏi <em>tất cả</em> các bài đang dùng nó.
+          Nếu chỉ muốn bỏ khỏi bài này thì dùng <strong>Gỡ khỏi bài</strong> ở danh sách câu hỏi.
+          Nếu bài đã có lượt làm, máy chủ sẽ từ chối.
+        </p>
       </Modal>
     </>
   )
 }
 
-function QuestionEditor({ d, editingQ, setEditingQ, onDelete }: { d: AdminFull; editingQ: AdminQuestion | null; setEditingQ: (q: AdminQuestion | null) => void; onDelete: (qid: number) => void }) {
+function QuestionEditor({ d, editingQ, setEditingQ, onDelete, onUnlink, onOpenBank }: {
+  d: AdminFull
+  editingQ: AdminQuestion | null
+  setEditingQ: (q: AdminQuestion | null) => void
+  onDelete: (qid: number) => void
+  onUnlink: (qid: number) => void
+  onOpenBank: () => void
+}) {
   const qc = useQueryClient()
   const quizId = d.id
   const isLocked = d.locked
@@ -179,15 +224,29 @@ function QuestionEditor({ d, editingQ, setEditingQ, onDelete }: { d: AdminFull; 
                   <div className="muted small">{q.options.length} đáp án</div>
                 </div>
                 <div className="row">
+                  {difficultyPill(q.difficulty)}
                   {q.correctId == null ? <Pill tone="bad">Chưa có đáp án đúng</Pill> : <Pill tone="good">Có đáp án đúng</Pill>}
                   <Button size="sm" onClick={() => setEditingQ(q)}>Sửa</Button>
+                  <Button size="sm" variant="danger" disabled={isLocked} onClick={() => onUnlink(q.id)}
+                    title={isLocked ? 'Bài đã có lượt làm nên không được gỡ câu hỏi' : 'Chỉ gỡ khỏi bài này, câu hỏi vẫn còn trong ngân hàng'}>
+                    Gỡ khỏi bài
+                  </Button>
                 </div>
               </div>
             </div>
           </div>
         ))}
       </div>
-      <Button variant="primary" onClick={() => setEditingQ({ id: 0, text: '', explanation: '', options: [{ id: 0, text: '', correct: false }, { id: 0, text: '', correct: false }], correctId: null })}>+ Thêm câu hỏi</Button>
+      {d.status === 'PUBLISHED' ? (
+        <Banner tone="warn" role="status">
+          Bài đang xuất bản nên không thể thêm hoặc gỡ câu hỏi. Hãy gỡ xuất bản trước nếu cần chỉnh sửa.
+        </Banner>
+      ) : (
+        <div className="row">
+          <Button variant="primary" onClick={() => setEditingQ({ id: 0, text: '', explanation: '', difficulty: 'MEDIUM', options: [{ id: 0, text: '', correct: false }, { id: 0, text: '', correct: false }], correctId: null })}>+ Tạo câu hỏi mới</Button>
+          <Button onClick={onOpenBank}>Mượn từ ngân hàng</Button>
+        </div>
+      )}
       {editingQ ? (
         <QuestionForm
           d={d}
@@ -312,5 +371,106 @@ function PublishTab({ d, onPublish, onUnpublish, publishing, pubErrs }: { d: Adm
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Modal mượn câu hỏi đã có sẵn trong ngân hàng.
+ * Câu hỏi không bị copy — server chỉ tạo thêm một dòng trong quiz_questions.
+ */
+function PickFromBankModal({ open, onClose, quizId }: { open: boolean; onClose: () => void; quizId: number }) {
+  const qc = useQueryClient()
+  const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
+  const [difficulty, setDifficulty] = useState('')
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  useEffect(() => { if (!open) { setSearch(''); setDebounced(''); setDifficulty('') } }, [open])
+
+  const detailQ = useQuery({ queryKey: ['admin-quiz', quizId], queryFn: () => teacher.get(quizId), enabled: open })
+  const listQ = useQuery({
+    queryKey: ['question-bank', debounced, difficulty, null],
+    queryFn: () => bank.search({ search: debounced, difficulty }),
+    enabled: open
+  })
+
+  const inQuiz = new Set((detailQ.data?.questions ?? []).map((q) => q.id))
+
+  const linkMut = useMutation({
+    mutationFn: (questionId: number) => bank.linkToQuiz(quizId, questionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-quiz', quizId] })
+      qc.invalidateQueries({ queryKey: ['question-bank'] })
+      qc.invalidateQueries({ queryKey: ['teacher-quizzes'] })
+      toast('Đã thêm vào bài', 'good')
+    },
+    onError: (e) => { if (e instanceof ApiCallError) toast(e.message, 'bad') }
+  })
+
+  const items = listQ.data ?? []
+
+  return (
+    <Modal open={open} onClose={onClose} title="Mượn câu hỏi từ ngân hàng" busy={linkMut.isPending}>
+      <div className="stack">
+        <p className="muted small" style={{ margin: 0 }}>
+          Câu hỏi được thêm nguyên vẹn, không tạo bản sao. Sửa câu hỏi trong ngân hàng sẽ áp dụng cho bài này.
+        </p>
+
+        <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Tìm câu hỏi">
+              <TextInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Từ khoá…" aria-label="Tìm câu hỏi" />
+            </Field>
+          </div>
+          <div style={{ width: 160 }}>
+            <Field label="Độ khó">
+              <Select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} aria-label="Lọc theo độ khó">
+                <option value="">Mọi độ khó</option>
+                <option value="EASY">Dễ</option>
+                <option value="MEDIUM">Trung bình</option>
+                <option value="HARD">Khó</option>
+              </Select>
+            </Field>
+          </div>
+        </div>
+
+        {listQ.isLoading ? <Skeleton h={220} /> : items.length === 0 ? (
+          <Banner tone="info" role="status">Không có câu hỏi nào khớp bộ lọc.</Banner>
+        ) : (
+          <div className="list" style={{ maxHeight: 380, overflowY: 'auto' }}>
+            {items.map((q) => {
+              const already = inQuiz.has(q.id)
+              return (
+                <div key={q.id} className="item" style={{ alignItems: 'flex-start' }}>
+                  <div className="t" style={{ flex: 1 }}>
+                    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                      {difficultyPill(q.difficulty)}
+                      {q.usageCount > 0 ? <Pill tone="info">Dùng trong {q.usageCount} bài</Pill> : null}
+                      {q.usedInPublishedQuiz ? <Pill tone="warn">Trong bài đã xuất bản</Pill> : null}
+                    </div>
+                    <div style={{ marginTop: 4 }}>{q.text}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={already || linkMut.isPending}
+                    onClick={() => linkMut.mutate(q.id)}
+                  >
+                    {already ? 'Đã có trong bài' : linkMut.isPending && linkMut.variables === q.id ? 'Đang thêm…' : 'Thêm'}
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="row end">
+          <Button onClick={onClose}>Xong</Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

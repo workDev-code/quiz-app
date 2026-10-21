@@ -31,6 +31,7 @@ export function TopBar() {
         {isTeacher ? (
           <>
             <NavLink to="/teacher">Bảng điều khiển</NavLink>
+            <NavLink to="/teacher/question-bank">Ngân hàng câu hỏi</NavLink>
           </>
         ) : (
           <>

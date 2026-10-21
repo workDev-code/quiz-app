@@ -11,6 +11,7 @@ import AttemptDetailPage from './pages/AttemptDetailPage'
 import HistoryPage from './pages/HistoryPage'
 import TeacherDashboardPage from './pages/TeacherDashboardPage'
 import QuizEditPage from './pages/QuizEditPage'
+import QuestionBankPage from './pages/QuestionBankPage'
 import TeacherResultsPage from './pages/TeacherResultsPage'
 import ForbiddenPage from './pages/ForbiddenPage'
 import UiKitPage from './pages/UiKitPage'
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/attempts/:id" element={<RequireAuth roles={['STUDENT']}><AttemptDetailPage /></RequireAuth>} />
           <Route path="/history" element={<RequireAuth roles={['STUDENT']}><HistoryPage /></RequireAuth>} />
           <Route path="/teacher" element={<RequireAuth roles={['TEACHER']}><TeacherDashboardPage /></RequireAuth>} />
+          <Route path="/teacher/question-bank" element={<RequireAuth roles={['TEACHER']}><QuestionBankPage /></RequireAuth>} />
           <Route path="/teacher/quizzes/new" element={<RequireAuth roles={['TEACHER']}><QuizEditPage /></RequireAuth>} />
           <Route path="/teacher/quizzes/:id" element={<RequireAuth roles={['TEACHER']}><QuizEditPage /></RequireAuth>} />
           <Route path="/teacher/quizzes/:id/results" element={<RequireAuth roles={['TEACHER']}><TeacherResultsPage /></RequireAuth>} />

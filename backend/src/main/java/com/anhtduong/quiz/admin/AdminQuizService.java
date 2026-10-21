@@ -390,6 +390,7 @@ public class AdminQuizService {
             aq.id = qe.getId();
             aq.text = qe.getText();
             aq.explanation = qe.getExplanation();
+            aq.difficulty = qe.getDifficulty();
             aq.options = new ArrayList<>();
             for (AnswerOptionEntity o : qe.getOptions()) {
                 AdminQuizDtos.AdminOption ao = new AdminQuizDtos.AdminOption();
